@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+#
+
+from argparse                           import ArgumentParser, RawTextHelpFormatter
+import json
+from datetime                           import datetime
+from lib.message_handler                import MessageHandler
+from lib.std                            import pre, prej
+
+SPACE = ' '
+
+class MsgHandler(MessageHandler):
+    def __init__(self):
+        super(MsgHandler, self).__init__(archive_messages=False)
+
+def to_date(ts):
+    return datetime.strptime(ts, "%A, %d. %B %Y %H:%M %Z")
+
+
+if __name__ == '__main__':
+    app_description = '''Count how many kernels each person cranked in a cycle.
+    '''
+    app_epilog = '''
+Examples:
+    ./wip
+    '''
+    help_msgs = '''A json file of messages to be processed.'''
+
+    parser = ArgumentParser(description=app_description, epilog=app_epilog, formatter_class=RawTextHelpFormatter)
+    parser.add_argument('msgs', nargs='?', help=help_msgs)
+    args = parser.parse_args()
+
+    with open(args.msgs, 'r') as fd:
+        msgs = json.loads(fd.read())
+
+    for jn in msgs:
+        for k in msgs[jn]:
+            msg = msgs[jn][k]
+
+            try:
+                o  = f'{k:60s} '
+                o += f'{msg["job.started"]:40s} '
+                o += f'{msg["job.finished"]:40s} '
+                o += f'{to_date(msg["job.finished"]) - to_date(msg["job.started"]):} '
+                pre(o)
+                o  = f'{SPACE:60s} '
+                o += f'{msg["sut.deploy.started"]:40s} '
+                o += f'{msg["sut.deploy.succeeded"]:40s} '
+                o += f'{to_date(msg["sut.deploy.succeeded"]) - to_date(msg["sut.deploy.started"])} '
+                pre(o)
+                o  = f'{SPACE:60s} '
+                o += f'{msg["sut.prep.started"]:40s} '
+                o += f'{msg["sut.prep.succeeded"]:40s} '
+                o += f'{to_date(msg["sut.prep.succeeded"]) - to_date(msg["sut.prep.started"])} '
+                pre(o)
+                o  = f'{SPACE:60s} '
+                o += f'{msg["sut.testing.started"]:40s} '
+                o += f'{msg["sut.testing.completed"]:40s} '
+                o += f'{to_date(msg["sut.testing.completed"]) - to_date(msg["sut.testing.started"])} '
+                pre(o)
+                pre()
+            except KeyError:
+                continue
+
+    # prej(msgs)
