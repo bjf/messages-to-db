@@ -241,7 +241,13 @@ class TJDB(SQLBase):
             q += '    test_start_timestamp       text,'                   #
             q += '    test_finish_timestamp      text,'                   #
             q += '    test_duration              text,'                   #
-            q += '    test_status                text'                    #
+            q += '    test_status                text,'                   #
+
+            q += '    job_duration_seconds       integer,'
+            q += '    prep_duration_seconds      integer,'
+            q += '    deploy_duration_seconds    integer,'
+            q += '    test_duration_seconds      integer,'
+            q += '    start_delay_seconds        integer'
             q += ');'
 
             cursor.execute(q)
@@ -284,6 +290,11 @@ class TJDB(SQLBase):
             return '"-1"'
         return f'"{str(to_date(lh) - to_date(rh))}"'
 
+    def duration_seconds(self, lh, rh):
+        if lh == '""' or rh == '""':
+            return 0
+        return (to_date(lh) - to_date(rh)).seconds
+
     def update(self, msg, debug=False):
         defaults = OrderedDict()
         defaults['id'                        ] = 'NULL'
@@ -322,9 +333,22 @@ class TJDB(SQLBase):
         defaults['test_duration'             ] = '"00:00:00"'
         defaults['test_status'               ] = '""'
 
+        int_defs = OrderedDict()
+        int_defs['job_duration_seconds'      ] = 0
+        int_defs['prep_duration_seconds'     ] = 0
+        int_defs['deploy_duration_seconds'   ] = 0
+        int_defs['test_duration_seconds'     ] = 0
+        int_defs['job_duration_seconds'      ] = 0
+        int_defs['start_delay_seconds'       ] = 0
+
         neo = OrderedDict()
         for k in defaults:
             neo[k] = defaults[k]
+        neo['job_duration_seconds'      ] = 0
+        neo['prep_duration_seconds'     ] = 0
+        neo['deploy_duration_seconds'   ] = 0
+        neo['test_duration_seconds'     ] = 0
+        neo['start_delay_seconds'       ] = 0
 
         try:
             recs = self.find_job(msg)
@@ -332,6 +356,11 @@ class TJDB(SQLBase):
             for k in defaults:
                 neo[k] = f'"{rec[k]}"'
             neo['id'] = rec['id']
+            neo['job_duration_seconds'      ] = rec['job_duration_seconds'      ]
+            neo['prep_duration_seconds'     ] = rec['prep_duration_seconds'     ]
+            neo['deploy_duration_seconds'   ] = rec['deploy_duration_seconds'   ]
+            neo['test_duration_seconds'     ] = rec['test_duration_seconds'     ]
+            neo['start_delay_seconds'       ] = rec['start_delay_seconds'       ]
         except NoRecordsFoundError:
             pass
 
@@ -367,12 +396,14 @@ class TJDB(SQLBase):
 
             if msg['op'] == 'job.finished':
                 neo['job_finish_timestamp']    = f'"{msg["timestamp"]}"'
-                neo['job_duration']        = self.duration(msg["timestamp"], neo["job_start_timestamp"])
+                neo['job_duration']            = self.duration(msg["timestamp"], neo["job_start_timestamp"])
+                neo['job_duration_seconds']    = self.duration_seconds(msg["timestamp"], neo["job_start_timestamp"])
                 break
 
             if msg['op'] == 'job.started':
                 neo['job_start_timestamp']     = f'"{msg["timestamp"]}"'
-                neo['start_delay'] = self.duration(msg["timestamp"], neo['job_created_timestamp'])
+                neo['start_delay']             = self.duration(msg["timestamp"], neo['job_created_timestamp'])
+                neo['start_delay_seconds']     = self.duration_seconds(msg["timestamp"], neo['job_created_timestamp'])
                 break
 
             # Deploy
@@ -382,15 +413,16 @@ class TJDB(SQLBase):
                 break
 
             if msg['op'] == 'sut.deploy.succeeded':
-                neo['deploy_finish_timestamp']  = f'"{msg["timestamp"]}"'
-                neo['deploy_duration']     = self.duration(msg["timestamp"], neo["deploy_start_timestamp"])
+                neo['deploy_finish_timestamp'] = f'"{msg["timestamp"]}"'
+                neo['deploy_duration']         = self.duration(msg["timestamp"], neo["deploy_start_timestamp"])
+                neo['deploy_duration_seconds'] = self.duration_seconds(msg["timestamp"], neo["deploy_start_timestamp"])
                 neo['deploy_status'] = '"succeeded"'
-
                 break
 
             if msg['op'] == 'sut.deploy.failed':
                 neo['deploy_finish_timestamp'] = f'"{msg["timestamp"]}"'
-                neo['deploy_duration']     = self.duration(msg["timestamp"], neo["deploy_start_timestamp"])
+                neo['deploy_duration']         = self.duration(msg["timestamp"], neo["deploy_start_timestamp"])
+                neo['deploy_duration_seconds'] = self.duration_seconds(msg["timestamp"], neo["deploy_start_timestamp"])
                 neo['deploy_status'] = '"failed"'
                 break
 
@@ -402,13 +434,15 @@ class TJDB(SQLBase):
 
             if msg['op'] == 'sut.prep.succeeded':
                 neo['prep_finish_timestamp']   = f'"{msg["timestamp"]}"'
-                neo['prep_duration']       = self.duration(msg["timestamp"], neo["prep_start_timestamp"])
+                neo['prep_duration']           = self.duration(msg["timestamp"], neo["prep_start_timestamp"])
+                neo['prep_duration_seconds']   = self.duration_seconds(msg["timestamp"], neo["prep_start_timestamp"])
                 neo['prep_status'] = '"succeeded"'
                 break
 
             if msg['op'] == 'sut.prep.failed':
                 neo['prep_finish_timestamp']   = f'"{msg["timestamp"]}"'
-                neo['prep_duration']       = self.duration(msg["timestamp"], neo["prep_start_timestamp"])
+                neo['prep_duration']           = self.duration(msg["timestamp"], neo["prep_start_timestamp"])
+                neo['prep_duration_seconds']   = self.duration_seconds(msg["timestamp"], neo["prep_start_timestamp"])
                 neo['prep_status'] = '"failed"'
                 break
 
@@ -420,13 +454,15 @@ class TJDB(SQLBase):
 
             if msg['op'] == 'sut.testing.completed':
                 neo['test_finish_timestamp']   = f'"{msg["timestamp"]}"'
-                neo['test_duration']       = self.duration(msg["timestamp"], neo["test_start_timestamp"])
+                neo['test_duration']           = self.duration(msg["timestamp"], neo["test_start_timestamp"])
+                neo['test_duration_seconds']   = self.duration_seconds(msg["timestamp"], neo["test_start_timestamp"])
                 neo['test_status'] = '"succeeded"'
                 break
 
             if msg['op'] == 'sut.testing.failed':
                 neo['test_finish_timestamp']   = f'"{msg["timestamp"]}"'
-                neo['test_duration']       = self.duration(msg["timestamp"], neo["test_start_timestamp"])
+                neo['test_duration']           = self.duration(msg["timestamp"], neo["test_start_timestamp"])
+                neo['test_duration_seconds']   = self.duration_seconds(msg["timestamp"], neo["test_start_timestamp"])
                 neo['test_status'] = '"failed"'
                 break
 
@@ -436,7 +472,13 @@ class TJDB(SQLBase):
         q += ','.join(list(neo.keys()))
         q += ') values ('
         q += str(neo['id']) + ','
-        q += ','.join(list(neo.values())[1:])
+        q += ','.join(list(neo.values())[1:-5])
+        q += ','
+        q += f'{neo["job_duration_seconds"      ]},'
+        q += f'{neo["prep_duration_seconds"     ]},'
+        q += f'{neo["deploy_duration_seconds"   ]},'
+        q += f'{neo["test_duration_seconds"     ]},'
+        q += f'{neo["start_delay_seconds"       ]} '
         q += ');'
         try:
             cursor = self.sql.cursor()
