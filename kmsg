@@ -203,11 +203,6 @@ Examples:
             sys.stderr.write(trace)
         except:
             pass
-        efile = open('./exceptions.log', 'a')
-        efile.write('Critical exception in %s' % sys.argv[0])
-        efile.write(trace)
-        efile.write('----------------------------------------\n\n')
-        efile.close()
 
     exit(retval)
 
