@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+#
+
+import sys
+import pika
+from argparse                           import ArgumentParser, RawDescriptionHelpFormatter
+import traceback
+import threading
+import queue
+from lib.msgq                           import MsgQueueCkct
+from lib.std                            import pre, CF, CS
+from lib.message_handler                import MessageHandler
+
+INFO      = CF('green')
+CYAN      = CF('cyan')
+TIMESTAMP = CF('grey_50')
+SERIES    = CF('cyan')
+PACKAGE   = CF('dark_orange')
+FLAVOUR   = CF('dark_orange')
+VERSION   = CF('dark_orange')
+CYCLE     = CF('yellow')
+SPIN      = CF('green')
+LOOK      = CF('magenta')
+
+# Exit
+#
+class Exit(Exception):
+    """
+    If an error message has already been displayed and we want to just exit the app, this
+    exception is raised.
+    """
+    pass
+
+class RequestHandler(threading.Thread, MessageHandler):
+
+    # __init__
+    #
+    def __init__(self, cmd_q=queue.Queue(), reply_q=queue.Queue(), cfg={}, msgq=None):
+        threading.Thread.__init__(self)
+        MessageHandler.__init__(self, archive_messages=False)
+        self.cmd_q = cmd_q
+        self.reply_q = reply_q
+        self.msgq = msgq
+        self.alive = threading.Event()
+        self.alive.set()
+        self.cfg = cfg
+
+    # dequeue
+    #
+    def dequeue(self):
+        try:
+            # Queue.get with timeout to allow checking self.alive
+            request = self.cmd_q.get(True, 0.1)
+            self.handle(request)
+
+        except queue.Empty:
+            pass
+
+    # run
+    #
+    def run(self):
+        while self.alive.isSet():
+            self.dequeue()
+
+# RequestsListener
+#
+class RequestsListener(object):
+    '''
+    '''
+
+    # __init__
+    #
+    def __init__(self, args):
+        '''
+        '''
+        self.args = args
+
+    # enqueue
+    #
+    def enqueue(self, payload):
+        self.rh.cmd_q.put(payload)
+
+    def valid_payload(self, payload):
+        retval = False
+        while True:
+            valid_keys = ['kernel.testing.job.status']
+            if payload['key'] not in valid_keys:
+                break
+
+            valid_ops  = [
+                'job.created',
+                'job.started',
+                'job.finished',
+                'jobs.created',
+
+                'sut.prep.started',
+                'sut.prep.succeeded',
+                'sut.prep.failed',
+
+                'sut.deploy.started',
+                'sut.deploy.succeeded',
+                'sut.deploy.failed',
+
+                'sut.testing.started',
+                'sut.testing.completed',
+                'sut.testing.failed',
+                'sut.testing.results',
+
+                'ingest.complete',
+            ]
+            if payload['op'] not in valid_ops:
+                pre(CS(f'  WARNING: {payload["op"]} is not recognized as a valid operation.', CF('red')))
+                break
+
+            retval = True
+            break
+        return retval
+
+    # msgq_handler
+    #
+    def msgq_handler(self, payload):
+        if not self.valid_payload(payload):
+            return
+
+        self.enqueue(payload)
+        if self.args.single_shot:
+            self.rh.dequeue()
+            raise Exit()
+
+    # main
+    #
+    def main(self, args):
+        retval = 0
+
+        try:
+            pre('Establishing connection to PS5 msgq service...')
+            try:
+                mq = MsgQueueCkct(local=args.local)
+            except pika.exceptions.AMQPConnectionError:
+                pre('  *** Aborting: Unable to connect to the AMQP server. VPN problem?')
+                return 1
+
+            cfg = {'args' : args}
+            self.rh = RequestHandler(msgq=mq, cfg=cfg)
+            if not args.single_shot:
+                self.rh.start()
+
+            queue = 'bjf-db-testing-job-status'
+            # mq.queue_delete(queue)
+            mq.listen(queue, 'kernel.testing.#', self.msgq_handler)
+            pre(CS('listening', INFO))
+
+            retval = 0
+
+        # Handle the user presses <ctrl-C>.
+        #
+        except KeyboardInterrupt:
+            pre("Aborting ...")
+            self.rh.alive.clear()
+
+        except Exit:
+            pre("")
+            pre("Due to the above error(self), this script is unable to continue and is terminating.")
+            pre("")
+            self.rh.alive.clear()
+
+        except:
+            self.rh.alive.clear()
+            raise
+
+        return retval
+
+
+if __name__ == '__main__':
+    retval = -1
+
+    # Command line argument setup and initial processing
+    #
+    app_description = '''
+This utility connects to the APMQ service (RabbitMQ) and listens for and handles tracking
+bug changes that are posted.
+    '''
+    app_epilog = '''
+Examples:
+    collector --local
+    '''
+    parser = ArgumentParser(description=app_description, epilog=app_epilog, formatter_class=RawDescriptionHelpFormatter)
+    parser.add_argument('--debug', action='store_true', default=False, help='')
+    parser.add_argument('--info',  action='store_true', default=False, help='')
+    parser.add_argument('--single-shot',  action='store_true', default=False, help='Exit after processing a single message.')
+    parser.add_argument('--local', action='store_true', default=False, help='Assume we have ssh tunnel setup to the MQ server.')
+
+    args = parser.parse_args()
+
+    try:
+        app = RequestsListener(args)
+        retval = app.main(args)
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        trace = traceback.format_exc()
+        try:
+            sys.stderr.write(trace)
+        except:
+            pass
+        efile = open('./exceptions.log', 'a')
+        efile.write('Critical exception in %s' % sys.argv[0])
+        efile.write(trace)
+        efile.write('----------------------------------------\n\n')
+        efile.close()
+
+    exit(retval)
+
+# vi:set ts=4 sw=4 expandtab syntax=python:
