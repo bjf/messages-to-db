@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+#
+
+import os
+from argparse                           import ArgumentParser, RawTextHelpFormatter
+import json
+from lib.std                            import pre, prej
+
+def store(msg):
+    if 'sru-cycle-raw' in msg and '-' in msg['sru-cycle-raw']:
+        (cycle, spin) = msg["sru-cycle-raw"].split('-', 1)
+    else:
+        (cycle, spin) = msg["sru-cycle"].split('-', 1)
+    p  = ''
+    p += f'{cycle}'
+    if "kernel-source" in msg:
+        p += f'/{msg["kernel-source"]}'
+    else:
+        p += f'/{msg["kernel-package"]}'
+    p += f'/{msg["kernel-version"]}'
+
+    os.makedirs(p, exist_ok=True)
+    with open(f'{p}/{msg["op"]}', 'a') as fd:
+        fd.write(json.dumps(msg))
+        fd.write('\n')
+
+
+if __name__ == '__main__':
+    app_description = '''Count how many kernels each person cranked in a cycle.
+    '''
+    app_epilog = '''
+Examples:
+    ./wip
+    '''
+    help_msgs = '''A json file of messages to be processed.'''
+
+    parser = ArgumentParser(description=app_description, epilog=app_epilog, formatter_class=RawTextHelpFormatter)
+    parser.add_argument('msgs', nargs='?', help=help_msgs)
+    args = parser.parse_args()
+
+    msgs = {}
+    total = 0
+    try:
+        with open(args.msgs, 'r') as fid:
+            while fid:
+                line = fid.readline()
+                if line != '':
+                    msg = json.loads(line)
+                    store(msg)
+                    total += 1
+                else:
+                    # End of file
+                    #
+                    break
+
+    except json.decoder.JSONDecodeError:
+        # Probably a empty string
+        pass
+
+    pre(f'{total} messages processed')

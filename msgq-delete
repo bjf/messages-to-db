@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+#
+
+import sys
+import pika
+from argparse                           import ArgumentParser, RawDescriptionHelpFormatter
+import traceback
+from lib.msgq                           import MsgQueueCkct
+from lib.std                            import pre, CF, CS
+
+INFO      = CF('green')
+CYAN      = CF('cyan')
+TIMESTAMP = CF('grey_50')
+SERIES    = CF('cyan')
+PACKAGE   = CF('dark_orange')
+FLAVOUR   = CF('dark_orange')
+VERSION   = CF('dark_orange')
+CYCLE     = CF('yellow')
+SPIN      = CF('green')
+LOOK      = CF('magenta')
+
+# RequestsListener
+#
+class RequestsListener(object):
+    '''
+    '''
+
+    # __init__
+    #
+    def __init__(self, args):
+        '''
+        '''
+        self.args = args
+
+    # main
+    #
+    def main(self, args):
+        retval = 0
+
+        try:
+            pre('Establishing connection to PS5 msgq service...')
+            try:
+                mq = MsgQueueCkct(local=args.local)
+            except pika.exceptions.AMQPConnectionError:
+                pre('  *** Aborting: Unable to connect to the AMQP server. VPN problem?')
+                return 1
+
+            queue = 'bjf-db-testing-job-status'
+            mq.queue_delete(queue)
+
+            retval = 0
+
+        # Handle the user presses <ctrl-C>.
+        #
+        except KeyboardInterrupt:
+            pre("Aborting ...")
+            self.rh.alive.clear()
+
+        except:
+            self.rh.alive.clear()
+            raise
+
+        return retval
+
+
+if __name__ == '__main__':
+    retval = -1
+
+    # Command line argument setup and initial processing
+    #
+    app_description = '''
+This utility connects to the APMQ service (RabbitMQ) and listens for and handles tracking
+bug changes that are posted.
+    '''
+    app_epilog = '''
+Examples:
+    collector --local
+    '''
+    parser = ArgumentParser(description=app_description, epilog=app_epilog, formatter_class=RawDescriptionHelpFormatter)
+    parser.add_argument('--debug', action='store_true', default=False, help='')
+    parser.add_argument('--info',  action='store_true', default=False, help='')
+    parser.add_argument('--single-shot',  action='store_true', default=False, help='Exit after processing a single message.')
+    parser.add_argument('--local', action='store_true', default=False, help='Assume we have ssh tunnel setup to the MQ server.')
+
+    args = parser.parse_args()
+
+    try:
+        app = RequestsListener(args)
+        retval = app.main(args)
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        trace = traceback.format_exc()
+        try:
+            sys.stderr.write(trace)
+        except:
+            pass
+
+    exit(retval)
+
+# vi:set ts=4 sw=4 expandtab syntax=python:
